@@ -42,6 +42,7 @@ public partial class MainWindow : Window
     private readonly Receiver receiver = new();
     private readonly System.Windows.Forms.NotifyIcon tray;
     private readonly System.Drawing.Icon trayIcon;
+    private readonly ConnectionTrayIcons connectionTrayIcons;
     private DesktopNotifications? desktopNotifications;
     private readonly DispatcherTimer timer = new() { Interval = TimeSpan.FromMilliseconds(200) };
     private readonly DispatcherTimer scrollIdle = new() { Interval = TimeSpan.FromMilliseconds(1000) };
@@ -89,7 +90,8 @@ public partial class MainWindow : Window
         if (!preview) try { iconHistory.Load(IconHistoryPath); } catch (Exception ex) { Diagnostics.Write("Icon history load failed: " + ex.Message); }
         using (var stream = System.Windows.Application.GetResourceStream(new Uri("pack://application:,,,/Assets/VMNotify.ico")).Stream)
         using (var loadedIcon = new System.Drawing.Icon(stream, 32, 32)) trayIcon = (System.Drawing.Icon)loadedIcon.Clone();
-        tray = new() { Icon = trayIcon, Text = "VMNotify", Visible = !preview };
+        connectionTrayIcons = new(trayIcon);
+        tray = new() { Icon = connectionTrayIcons[ConnectionState.Disconnected], Text = "VMNotify", Visible = !preview };
         var menu = new System.Windows.Forms.ContextMenuStrip();
         menu.Items.Add("打开 VMNotify", null, (_, _) => Dispatcher.Invoke(ShowWindow));
         menu.Items.Add("退出", null, (_, _) => Dispatcher.InvokeAsync(async () => { quitting = true; await Stop(); Close(); }));
@@ -142,7 +144,7 @@ public partial class MainWindow : Window
         Closed += (_, _) => {
             calendarTimer.Stop(); calendarLifetime.Cancel(); calendarClient.Dispose();
             updateLifetime.Cancel(); updateClient.Dispose();
-            timer.Stop(); scrollIdle.Stop(); cancellation?.Cancel(); tray.Dispose(); trayIcon.Dispose();
+            timer.Stop(); scrollIdle.Stop(); cancellation?.Cancel(); tray.Dispose(); connectionTrayIcons.Dispose(); trayIcon.Dispose();
             desktopNotifications?.Dispose();
             if (!preview) SystemTheme.Settings.ColorValuesChanged -= ThemeChanged;
             windowSource?.RemoveHook(WindowMessage);
@@ -245,7 +247,8 @@ public partial class MainWindow : Window
         var filtered = AppCatalog.Filter(apps, saved, AppSearchInput.Text, showingIgnored);
         AppItems.ItemsSource = filtered.Select(a => new AppChoice { Id = a.Id, Name = a.Name, Enabled = !showingIgnored && enabled.Contains(a.Id), Detail = showingIgnored ? "已忽略 · 不接收提醒，恢复后可重新开启" : a.Description,
             CanEnable = !showingIgnored, IgnoreAction = showingIgnored ? "恢复显示" : "忽略",
-            RuleSummary = saved.Rules.TryGetValue(a.Id, out var rule) ? $"{rule.Description} · 检测 {rule.SampleMilliseconds / 1000d:0.##} 秒 · 持续 {rule.HoldSeconds} 秒 · " + (rule.RepeatSeconds == 0 ? "仅提醒一次" : $"每 {rule.RepeatSeconds} 秒提醒") : "闪烁或需要关注 · 检测 0.25 秒 · 每 3 分钟提醒" }).ToArray();
+            RuleSummary = saved.Rules.TryGetValue(a.Id, out var rule) ? $"{rule.Description} · 检测 {rule.SampleMilliseconds / 1000d:0.##} 秒 · 持续 {rule.HoldSeconds} 秒 · "
+                + (rule.FlashingNotification ? "闪烁型 · " : "") + (rule.RepeatSeconds == 0 ? "仅提醒一次" : $"每 {rule.RepeatSeconds} 秒提醒") : "闪烁或需要关注 · 检测 0.25 秒 · 每 3 分钟提醒" }).ToArray();
         EmptyApps.Visibility = filtered.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
         EmptyAppsTitle.Text = AppSearchInput.Text.Trim().Length > 0 ? "没有匹配的应用" : showingIgnored ? "没有已忽略的应用" : "尚未发现可显示的应用";
         EmptyAppsDetail.Text = AppSearchInput.Text.Trim().Length > 0 ? "试试其他应用名称，或清空搜索。" : showingIgnored ? "忽略的应用会显示在这里，可随时恢复。" : "连接虚拟机并重新探测，或在“已忽略的应用”中恢复应用。";
@@ -273,7 +276,8 @@ public partial class MainWindow : Window
     private void RefreshStatus()
     {
         RefreshDiscoveryStatus();
-        bool connected = receiver.Status.StartsWith("已连接");
+        var connection = receiver.ConnectionState;
+        bool connected = connection is ConnectionState.Connected or ConnectionState.Degraded;
         var status = receiver.Status;
         bool retrying = status.Contains("后重试") || status.StartsWith("正在");
         ConnectionLabel.Text = connected ? status.Contains("不可用") ? "已连接 · 监听异常" : "已连接"
@@ -284,7 +288,14 @@ public partial class MainWindow : Window
         StatusTitle.Text = connected ? "正在接收虚拟机提醒" : receiver.Status.StartsWith("正在") ? "正在连接虚拟机" : "连接你的虚拟机";
         StatusDetail.Text = receiver.Status is "未连接" or "已断开" ? saved.ScheduleEnabled ? scheduleStatus : "开始连接后，你选择的应用会在这台电脑上显示提醒。" : receiver.Status;
         StatusIcon.Text = connected ? "\uE73E" : "\uE8D7";
-        tray.Text = "VMNotify · " + (connected ? "已连接" : "未连接");
+        var icon = connectionTrayIcons[connection];
+        if (!ReferenceEquals(tray.Icon, icon)) tray.Icon = icon;
+        tray.Text = "VMNotify · " + (connection switch {
+            ConnectionState.Connected => "已连接 · 正在监听",
+            ConnectionState.Degraded => "已连接 · 监听异常",
+            ConnectionState.Connecting => "正在连接或重连",
+            _ => "未连接"
+        });
         HostSummary.Text = saved.Host.Length == 0 ? "尚未配置" : saved.Host;
         AppsSummary.Text = receiver.AvailableApps.Length == 0 ? "连接后发现受支持的应用" : $"{receiver.AvailableApps.Count(a => enabled.Contains(a.Id))} 个应用已开启转发";
         QuickConnect.Content = HostInput.Text.Length == 0 ? "配置连接" : connected ? "重新连接" : "连接虚拟机";
@@ -424,6 +435,7 @@ public partial class MainWindow : Window
     internal async Task ExportPreviews(string directory)
     {
         Directory.CreateDirectory(directory);
+        PreviewConnectionTray(directory);
         // Preview data is illustrative, never saved or connected to a real machine.
         HostInput.Text = "192.0.2.10"; UserInput.Text = "desktop-user";
         await PreviewUpdateCleanup(directory);

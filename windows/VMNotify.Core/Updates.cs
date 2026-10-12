@@ -10,8 +10,8 @@ public sealed record DownloadedUpdate(string Version, string FileName, string Sh
 
 public sealed class Updates(HttpClient client, string directory)
 {
-    public const string RepositoryUrl = "https://github.com/Noemion/VMNotify";
-    public const string LatestUrl = "https://github.com/Noemion/VMNotify/releases/latest";
+    public const string RepositoryUrl = "https://github.com/Aegyce/VMNotify";
+    public const string LatestUrl = RepositoryUrl + "/releases/latest";
     private const long MaximumSize = 512L * 1024 * 1024;
     private static readonly Regex FilePattern = new(@"\AVMNotify-\d+\.\d+\.\d+-win-(x86|x64|arm64)-setup\.exe\z");
     public static Version ParseVersion(string text)
@@ -31,13 +31,15 @@ public sealed class Updates(HttpClient client, string directory)
         if (latest.StatusCode == HttpStatusCode.NotFound) throw new InvalidDataException("仓库暂无可访问的正式发布版本。");
         latest.EnsureSuccessStatusCode();
         var uri = latest.RequestMessage?.RequestUri;
-        var tag = uri == null ? Match.Empty : Regex.Match(uri.AbsolutePath, @"\A/Noemion/VMNotify/releases/tag/v(\d+\.\d+\.\d+)\z");
+        // GitHub redirects moved/renamed repositories to their canonical release URL.
+        var tag = uri == null ? Match.Empty : Regex.Match(uri.AbsolutePath,
+            @"\A/(?<owner>[A-Za-z0-9][A-Za-z0-9-]*)/(?<repo>[A-Za-z0-9][A-Za-z0-9_.-]*)/releases/tag/v(?<version>\d+\.\d+\.\d+)\z");
         if (uri?.Scheme != "https" || uri.Host != "github.com" || uri.UserInfo.Length != 0 || !uri.IsDefaultPort || !tag.Success)
             throw new InvalidDataException("无法确认 GitHub 正式发布版本，请打开发布页面下载。");
-        var version = ParseVersion(tag.Groups[1].Value);
+        var version = ParseVersion(tag.Groups["version"].Value);
         if (version <= ParseVersion(currentVersion)) return null;
         string name = $"VMNotify-{version}-win-{architecture}-setup.exe";
-        string baseUrl = RepositoryUrl + "/releases/download/v" + version + "/";
+        string baseUrl = $"https://github.com/{tag.Groups["owner"].Value}/{tag.Groups["repo"].Value}/releases/download/v{version}/";
         using var checksumResponse = await client.GetAsync(baseUrl + "SHA256SUMS-windows.txt", HttpCompletionOption.ResponseHeadersRead, token);
         checksumResponse.EnsureSuccessStatusCode();
         await checksumResponse.Content.LoadIntoBufferAsync(65536, token);

@@ -192,6 +192,7 @@ Console.WriteLine("All protocol, framing and SSH argument tests passed.");
 await UpdateTests.Run();
 TimingTests.Run();
 RuleTests.Run();
+FlashingTests.Run();
 CalendarTests.Run();
 await CalendarUpdateTests.Run();
 SshAuthorizationTests.Run();

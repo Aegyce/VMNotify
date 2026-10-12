@@ -15,6 +15,7 @@ public sealed record NotificationRule
     public int SampleMilliseconds { get; init; } = 250;
     public int RepeatSeconds { get; init; } = 180;
     public bool NotifyInitial { get; init; } = true;
+    public bool FlashingNotification { get; init; }
     public string Message { get; init; } = "";
     public void Validate()
     {
@@ -80,14 +81,23 @@ public sealed record IconObservation(string InstanceId, string? Fingerprint, str
 public sealed class RuleState
 {
     private bool initialized, armed;
-    private long? since;
+    private long? since, normalSince;
     public bool Active { get; private set; }
     public bool Update(NotificationRule rule, IconObservation icon, TimeProvider clock)
     {
         var matches = rule.Matches(icon);
-        if (matches == null) { since = null; Active = false; return false; }
+        if (matches == null) { since = normalSince = null; Active = false; return false; }
         if (!initialized) { initialized = true; armed = rule.NotifyInitial || !matches.Value; }
-        if (!matches.Value) { armed = true; since = null; Active = false; return false; }
+        if (!matches.Value) {
+            // A flashing icon can alternate between matching and normal frames.
+            // Preserve the round and its hold timer until normal telemetry is sustained.
+            if (rule.FlashingNotification && (since != null || !armed)) {
+                normalSince ??= clock.GetTimestamp();
+                if (clock.GetElapsedTime(normalSince.Value) < TimeSpan.FromSeconds(3)) return Active;
+            }
+            armed = true; since = normalSince = null; Active = false; return false;
+        }
+        normalSince = null;
         if (!armed) return false;
         since ??= clock.GetTimestamp();
         return Active = clock.GetElapsedTime(since.Value).TotalSeconds >= rule.HoldSeconds;

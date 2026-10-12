@@ -50,6 +50,7 @@ public partial class MainWindow
         var page = OpenRules(previewId, "aTrustTray2", () => [icon]);
         try {
             var newPage = new RulePage("测试", null, () => [icon], () => []);
+            if (newPage.FlashingInput.IsChecked == true) throw new InvalidOperationException("Flashing mode must be opt-in");
             newPage.ConditionInput.SelectedValue = RuleCondition.Grayscale;
             if (newPage.ConditionInput.SelectedIndex >= 0) throw new InvalidOperationException("New rules must not offer legacy grayscale condition");
             newPage.ConditionInput.SelectedValue = RuleCondition.Colorful;
@@ -114,10 +115,22 @@ public partial class MainWindow
             page.SaveButton.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
             if (RulesHost.Content != page || page.ValidationMessage.Text.Length == 0) throw new InvalidOperationException("Invalid input must remain on the rule page");
             page.ConditionInput.SelectedValue = RuleCondition.Grayscale; page.SampleInput.Text = "1";
+            page.FlashingInput.IsChecked = true;
+            page.ValidationMessage.Text = "";
+            page.RuleScroll.ScrollToEnd(); UpdateLayout();
+            var flashingTop = page.FlashingInput.TranslatePoint(new System.Windows.Point(), page.RuleScroll).Y;
+            page.RuleScroll.ScrollToVerticalOffset(page.RuleScroll.VerticalOffset + flashingTop - 8);
+            UpdateLayout(); await Task.Delay(100);
+            var flashingBitmap = new System.Windows.Media.Imaging.RenderTargetBitmap((int)Root.ActualWidth, (int)Root.ActualHeight, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+            flashingBitmap.Render(Root);
+            var flashingEncoder = new System.Windows.Media.Imaging.PngBitmapEncoder(); flashingEncoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(flashingBitmap));
+            using (var output = System.IO.File.Create(System.IO.Path.Combine(directory, $"rules-flashing-{(light ? "light" : "dark")}.png"))) flashingEncoder.Save(output);
             page.SaveButton.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
-            if (RulesHost.Content != null || saved.Rules[previewId].SampleMilliseconds != 1000 || AppsPage.Visibility != Visibility.Visible)
+            if (RulesHost.Content != null || saved.Rules[previewId].SampleMilliseconds != 1000
+                || !saved.Rules[previewId].FlashingNotification || saved.Rules[previewId].RepeatSeconds != 60 || AppsPage.Visibility != Visibility.Visible)
                 throw new InvalidOperationException("Saving must apply the rule and return to apps");
             page = OpenRules(previewId, "aTrustTray2", () => [icon]); page.HoldInput.Text = "999";
+            if (page.FlashingInput.IsChecked != true) throw new InvalidOperationException("Saved flashing mode must be checked when reopened");
             page.BackButton.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
             if (saved.Rules[previewId].HoldSeconds == 999 || RulesHost.Content != null) throw new InvalidOperationException("Back must discard unsaved input");
             page = OpenRules(previewId, "aTrustTray2", () => [icon]);

@@ -91,6 +91,8 @@
                     <TextBox x:Name="ToleranceInput" Margin="0,6,0,0"/>
                 </StackPanel>
                 <TextBlock x:Name="ConditionHelp" Style="{DynamicResource Secondary}" Margin="0,8,0,0"/>
+                <CheckBox x:Name="FlashingInput" Foreground="{DynamicResource MainText}" Content="图标会持续闪烁（合并同一轮提醒）" Margin="0,16,0,0"/>
+                <TextBlock Text="勾选后合并反复交替的图标状态，并共用下方重复间隔：0 为每轮仅一次，大于 0 则按间隔重复。持续恢复正常 3 秒后结束本轮；读取失败、图标退出或连接断开也会结束本轮。" Style="{DynamicResource Secondary}" Margin="0,6,0,0"/>
                 <TextBlock Text="检测间隔（秒，0.25–60，按 0.25 递增）" Margin="0,16,0,6"/>
                 <TextBox x:Name="SampleInput"/>
                 <TextBlock Text="每个应用独立设置。闪烁检测使用 0.25 或 0.5 秒；颜色、名称等状态可使用更长间隔。修改检测间隔会自动重新连接虚拟机。" Style="{DynamicResource Secondary}" Margin="0,6,0,0"/>

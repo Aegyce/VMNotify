@@ -51,11 +51,30 @@ internal static class UpdateTests
             calls = 0;
             Check(await fallback.Check("0.2.0", "x64", default) == null && calls == 1);
         }
-        foreach (var broken in new[] { "foreign", "prerelease", "missing-hash", "duplicate-hash", "missing-size", "oversized" }) {
+        foreach (var movedRepository in new[] { "Aegyce/VMNotify", "NewOwner/RenamedNotify" }) {
+            string canonical = "https://github.com/" + movedRepository;
+            using var movedClient = new HttpClient(new Handler(request => {
+                if (request.RequestUri!.AbsolutePath.EndsWith("/releases/latest")) {
+                    Check(request.RequestUri.ToString() == Updates.LatestUrl);
+                    return new(HttpStatusCode.OK) { RequestMessage = new(HttpMethod.Get, canonical + "/releases/tag/v0.2.0"), Content = new StringContent("") };
+                }
+                Check(request.RequestUri.ToString().StartsWith(canonical + "/releases/download/v0.2.0/", StringComparison.Ordinal));
+                if (request.RequestUri.AbsolutePath.EndsWith("SHA256SUMS-windows.txt")) return new(HttpStatusCode.OK) { Content = new StringContent(hash + "  " + name + "\n") };
+                Check(request.Method == HttpMethod.Head);
+                return new(HttpStatusCode.OK) { Content = new ByteArrayContent(content) };
+            }));
+            var moved = await new Updates(movedClient, "unused").Check("0.1.1", "x64", default);
+            Check(moved?.Url == canonical + "/releases/download/v0.2.0/" + name);
+        }
+        foreach (var broken in new[] { "foreign", "http", "port", "userinfo", "bad-path", "prerelease", "missing-hash", "duplicate-hash", "missing-size", "oversized" }) {
             using var badClient = new HttpClient(new Handler(request => {
                 Check(request.RequestUri!.Host == "github.com");
                 if (request.RequestUri.AbsolutePath.EndsWith("/releases/latest")) return new(HttpStatusCode.OK) {
-                    RequestMessage = new(HttpMethod.Get, broken == "foreign" ? "https://example.com/Noemion/VMNotify/releases/tag/v0.2.0"
+                    RequestMessage = new(HttpMethod.Get, broken == "foreign" ? "https://example.com/Aegyce/VMNotify/releases/tag/v0.2.0"
+                        : broken == "http" ? Updates.RepositoryUrl.Replace("https:", "http:") + "/releases/tag/v0.2.0"
+                        : broken == "port" ? "https://github.com:444/Aegyce/VMNotify/releases/tag/v0.2.0"
+                        : broken == "userinfo" ? "https://user@github.com/Aegyce/VMNotify/releases/tag/v0.2.0"
+                        : broken == "bad-path" ? Updates.RepositoryUrl + "/issues/v0.2.0"
                         : Updates.RepositoryUrl + "/releases/tag/v0.2.0" + (broken == "prerelease" ? "-beta" : "")), Content = new StringContent("") };
                 if (request.RequestUri.AbsolutePath.EndsWith("SHA256SUMS-windows.txt")) return new(HttpStatusCode.OK) {
                     Content = new StringContent(broken == "oversized" ? new string('x', 65537) : broken == "missing-hash" ? ""

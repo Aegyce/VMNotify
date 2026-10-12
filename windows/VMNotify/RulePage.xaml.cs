@@ -41,6 +41,7 @@ public partial class RulePage : System.Windows.Controls.UserControl
         HoldInput.Text = rule.HoldSeconds.ToString(); RepeatInput.Text = rule.RepeatSeconds.ToString();
         SampleInput.Text = (rule.SampleMilliseconds / 1000m).ToString(System.Globalization.CultureInfo.InvariantCulture);
         InitialInput.IsChecked = rule.NotifyInitial; MessageInput.Text = rule.Message;
+        FlashingInput.IsChecked = rule.FlashingNotification;
         initialized = true; UpdateCondition(); Refresh();
         refresh.Tick += (_, _) => Refresh();
         Loaded += (_, _) => refresh.Start(); Unloaded += (_, _) => refresh.Stop();
@@ -155,7 +156,8 @@ public partial class RulePage : System.Windows.Controls.UserControl
                 || sample < .25m || sample > 60 || sample * 1000 % 250 != 0)
                 throw new ArgumentException("检测间隔应为 0.25–60 秒，按 0.25 秒递增，例如 0.25、0.5、2、5。");
             var rule = new NotificationRule { Condition = Condition, Target = TargetInput.Text.Trim(), HoldSeconds = hold,
-                RepeatSeconds = repeat, SampleMilliseconds = (int)(sample * 1000), Tolerance = tolerance, NotifyInitial = InitialInput.IsChecked == true, Message = MessageInput.Text.Trim() };
+                RepeatSeconds = repeat, SampleMilliseconds = (int)(sample * 1000), Tolerance = tolerance, NotifyInitial = InitialInput.IsChecked == true,
+                FlashingNotification = FlashingInput.IsChecked == true, Message = MessageInput.Text.Trim() };
             rule.Validate(); SaveRequested?.Invoke(rule);
         } catch (ArgumentException ex) { ValidationMessage.Text = ex.Message; }
     }

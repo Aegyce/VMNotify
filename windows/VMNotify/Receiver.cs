@@ -25,11 +25,12 @@ internal sealed class Receiver
     public string? AgentVersion => Volatile.Read(ref agentVersion);
     public long InventoryRevision => Interlocked.Read(ref inventoryRevision);
     public long DiscoverySessionRevision => Interlocked.Read(ref discoverySessionRevision);
-    public bool CanRediscover { get { lock (selectionLock) return currentSession is { IsCancellationRequested: false } && Status.StartsWith("已连接"); } }
+    public bool CanRediscover { get { lock (selectionLock) return currentSession is { IsCancellationRequested: false }
+        && ConnectionState is ConnectionState.Connected or ConnectionState.Degraded; } }
     public bool RequestRediscovery() {
         lock (selectionLock) {
             if (!CanRediscover) return false;
-            SetStatus("正在重新探测托盘图标…");
+            SetStatus("正在重新探测托盘图标…", ConnectionState.Connecting);
             currentSession!.Cancel();
             return true;
         }
@@ -119,6 +120,8 @@ internal sealed class Receiver
         lock (selectionLock) if (activeAlerts.TryGetValue(ev.AppId!, out var alert) && ReferenceEquals(alert.Pending, ev)) alert.LastQueued = clock.GetTimestamp();
     }
     private string status = "未连接";
+    private int connectionState;
+    public ConnectionState ConnectionState => (ConnectionState)Volatile.Read(ref connectionState);
     private AvailableApp[] availableApps = [];
     private string[] enabledApps = [];
     public AvailableApp[] AvailableApps => Volatile.Read(ref availableApps);
@@ -160,7 +163,9 @@ internal sealed class Receiver
     } }
     public bool IsEnabled(string id) => Volatile.Read(ref enabledApps).Contains(id);
     public string Status => Volatile.Read(ref status);
-    private void SetStatus(string text) { Volatile.Write(ref status, text); Diagnostics.Write("Status: " + text); }
+    internal void SetStatus(string text, ConnectionState state = ConnectionState.Connecting) {
+        Volatile.Write(ref status, text); Volatile.Write(ref connectionState, (int)state); Diagnostics.Write("Status: " + text);
+    }
 
     public static string SshPath()
     {
@@ -185,7 +190,7 @@ internal sealed class Receiver
             catch (AuthorizationRejectedException) { rejected = true; break; }
             catch (OperationCanceledException) when (stop.IsCancellationRequested) { break; }
             catch (OperationCanceledException) when (restart.IsCancellationRequested) { continue; }
-            catch (Exception ex) { SetStatus("连接中断：" + ex.Message[..Math.Min(300, ex.Message.Length)]); }
+            catch (Exception ex) { SetStatus("连接中断：" + ex.Message[..Math.Min(300, ex.Message.Length)], ConnectionState.Disconnected); }
             finally { lock (selectionLock) { if (ReferenceEquals(currentSession, restart)) currentSession = null; } }
             if (stop.IsCancellationRequested) break;
             if (started.Elapsed > TimeSpan.FromMinutes(1)) retry = 1;
@@ -194,7 +199,7 @@ internal sealed class Receiver
             catch (OperationCanceledException) { break; }
             retry = Math.Min(30, retry * 2);
         }
-        SetStatus(rejected ? "SSH 授权已取消；点击“保存并连接”重试" : "已断开");
+        SetStatus(rejected ? "SSH 授权已取消；点击“保存并连接”重试" : "已断开", ConnectionState.Disconnected);
         Volatile.Write(ref availableApps, []);
     }
 
@@ -258,8 +263,8 @@ internal sealed class Receiver
                 if (ev.Kind != "heartbeat" && ev.Kind != "apps") Diagnostics.Write("Agent event: " + ev.Kind + " app=" + ev.AppId + " enabled=" + (ev.AppId != null && IsEnabled(ev.AppId)));
                 session.CancelAfter(TimeSpan.FromSeconds(45));
                 if (ev.Kind == "agent_info") Volatile.Write(ref agentVersion, ev.AgentVersion);
-                if (ev.Kind == "ready") { ready = true; SetStatus("已连接 · 正在监听"); }
-                if (ev.Kind == "degraded") { ClearAttention(); SetStatus("已连接 · 桌面托盘接口暂不可用"); }
+                if (ev.Kind == "ready") { ready = true; SetStatus("已连接 · 正在监听", ConnectionState.Connected); }
+                if (ev.Kind == "degraded") { ClearAttention(); SetStatus("已连接 · 桌面托盘接口暂不可用", ConnectionState.Degraded); }
                 if (ev.Kind == "apps") {
                     Volatile.Write(ref availableApps, ev.Apps!);
                     Interlocked.Exchange(ref inventoryRevision, discoveryRevision);
@@ -279,6 +284,7 @@ internal sealed class Receiver
         { throw new IOException("45 秒未收到代理心跳"); }
         finally
         {
+            SetStatus("已断开", ConnectionState.Disconnected);
             ClearAttention();
             session.Cancel();
             try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch (InvalidOperationException) { }

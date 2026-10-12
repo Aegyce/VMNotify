@@ -334,7 +334,7 @@
                             <TextBlock Text="将虚拟机应用提醒转发到 Windows。" Style="{StaticResource Secondary}" Margin="0,6,0,12"/>
                             <TextBlock x:Name="AboutVersion"/>
                             <TextBlock x:Name="AboutBuild" Style="{StaticResource Secondary}"/>
-                            <TextBlock Margin="0,12,0,0"><Hyperlink Click="RepositoryClicked" Foreground="{DynamicResource Accent}">GitHub · Noemion/VMNotify</Hyperlink></TextBlock>
+                            <TextBlock Margin="0,12,0,0"><Hyperlink Click="RepositoryClicked" Foreground="{DynamicResource Accent}">GitHub · Aegyce/VMNotify</Hyperlink></TextBlock>
                         </StackPanel></Border>
                         <Border Style="{StaticResource Card}"><StackPanel>
                             <TextBlock Text="应用更新" FontWeight="SemiBold"/>
