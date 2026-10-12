@@ -10,7 +10,7 @@ internal static class FlashingTests
         var rule = new NotificationRule { Condition = RuleCondition.IconEquals, Target = "pix-v1-alert",
             FlashingNotification = true, RepeatSeconds = 10 };
         var alert = new IconObservation("tray", "pix-v1-alert", null, true, [], false, false);
-        var normal = alert with { Fingerprint = "pix-v1-normal" };
+        var normal = alert with { Fingerprint = "pix-v1-normal", Colorful = false };
         AgentEvent Sample(IconObservation icon) => new("heartbeat", "lanxin", "蓝信", Icon: icon);
         receiver.SetEnabledApps(["lanxin"]); receiver.SetRules(new() { ["lanxin"] = rule });
         receiver.ApplyObservation(Sample(alert));
@@ -22,9 +22,11 @@ internal static class FlashingTests
             receiver.ApplyObservation(Sample(i % 2 == 0 ? alert : normal)); receiver.QueueReminders();
             Check(receiver.ShouldDisplay(first!) && !receiver.Notifications.Reader.TryRead(out _), "alternating frames must not restart or bypass repeat interval");
         }
-        clock.Advance(TimeSpan.FromMilliseconds(250)); receiver.ApplyObservation(Sample(alert)); receiver.QueueReminders();
+        clock.Advance(TimeSpan.FromMilliseconds(250)); receiver.ApplyObservation(Sample(normal)); receiver.QueueReminders();
         Check(receiver.Notifications.Reader.TryRead(out var repeat) && repeat.Kind == "reminder" && receiver.ShouldDisplay(repeat), "flashing uses the existing ten-second interval");
+        Check(repeat!.Message == "蓝信 图标变为彩色", "a temporary normal frame must not rewrite flashing reminder text");
         receiver.MarkDelivered(repeat!);
+        receiver.ApplyObservation(Sample(alert));
         receiver.ApplyObservation(Sample(normal)); clock.Advance(TimeSpan.FromMilliseconds(2999)); receiver.ApplyObservation(Sample(normal));
         Check(receiver.ShouldDisplay(repeat!), "short normal pause remains the same round");
         clock.Advance(TimeSpan.FromMilliseconds(1)); receiver.ApplyObservation(Sample(normal));

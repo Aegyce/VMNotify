@@ -89,6 +89,8 @@ internal sealed class Receiver
         if (!rules.TryGetValue(appId, out var rule)) return;
         var active = observations.Where(p => p.Key.App == appId).Select(p => p.Value).FirstOrDefault(o => o.State.Active);
         if (active == null) { activeAlerts.Remove(appId); return; }
+        // During the quiet buffer, retain the last matching frame's notification text.
+        if (rule.FlashingNotification && rule.Matches(active.Event.Icon!) != true && activeAlerts.ContainsKey(appId)) return;
         var notification = active.Event with { Kind = "attention", Icon = null,
             Message = rule.NotificationText(active.Event.AppName ?? appId, active.Event.Icon!) };
         if (activeAlerts.TryGetValue(appId, out var existing)) existing.Original = notification;
